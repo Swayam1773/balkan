@@ -3,12 +3,16 @@
 from flask import Flask, jsonify, request
 import torch
 import numpy as np
-from torch_geometric.nn import GCNConv
 from neo4j import GraphDatabase
 import networkx as nx
 import torch
 from torch_geometric.data import Data
 import torch.nn.functional as F
+import torch
+import torch.nn.functional as F
+from torch_geometric.nn import MessagePassing
+from torch_geometric.utils import add_self_loops, degree
+
 
 def create_data(user,password):
     uri = "bolt://localhost:7687"
@@ -66,13 +70,30 @@ def index_to_author(value):
 class GNNModel(torch.nn.Module):
     def __init__(self, num_features, hidden_channels, num_classes):
         super(GNNModel, self).__init__()
-        self.conv1 = GCNConv(num_features, hidden_channels)
-        self.conv2 = GCNConv(hidden_channels, num_classes)
+        self.conv = GNNConv(num_features, hidden_channels)
+        self.fc = torch.nn.Linear(hidden_channels, num_classes)
 
     def forward(self, x, edge_index):
-        x = F.relu(self.conv1(x, edge_index))
-        x = self.conv2(x, edge_index)
+        x = self.conv(x, edge_index)
+        x = F.relu(x)
+        x = self.fc(x)
         return x
+
+class GNNConv(MessagePassing):
+    def __init__(self, in_channels, out_channels):
+        super(GNNConv, self).__init__(aggr="add")  # "add" aggregation
+        self.lin = torch.nn.Linear(in_channels, out_channels)
+
+    def forward(self, x, edge_index):
+        edge_index, _ = add_self_loops(edge_index, num_nodes=x.size(0))
+        x = self.lin(x)
+        return self.propagate(edge_index, x=x)
+
+    def message(self, x_j):
+        return x_j
+
+    def update(self, aggr_out):
+        return aggr_out
 
 app = Flask(__name__)
 
